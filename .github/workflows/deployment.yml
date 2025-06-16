@@ -1,0 +1,69 @@
+name: 'terraform-azure-deployment'
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
+
+run-name: "${{ github.ref_name }}.${{ github.sha }}.${{ github.workflow }}"
+
+env:
+  TF_VERSION: '1.7.4'
+  TF_FOLDER: 'infra'
+  TF_LOG: info
+  ARM_TENANT_ID: 0ae51e19-07c8-4e4b-bb6d-648ee58410f4 # Change the tenant
+  ARM_USE_MSI: true
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 'Checkout'
+      uses: actions/checkout@v4
+
+    - name: 'Setup Terraform'
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+
+    - name: Azure login
+      uses: azure/login@v2
+      with:
+        auth-type: IDENTITY
+        tenant-id: 0ae51e19-07c8-4e4b-bb6d-648ee58410f4 # Change the tenant id
+        subscription-id: 3d79666d-a060-4322-9f72-7291c9e8f743 # Change the subscription id
+        enable-AzPSSession: false
+
+    - name: Set subscription ID
+      run: |
+        cd ${{ env.TF_FOLDER }}
+        SUBSCRIPTION_ID=$(grep subscription_id ../${{ inputs.environment }}/terraform.tfvars | cut -d'"' -f2 || echo "${{ secrets.AZURE_SUBSCRIPTION_ID }}")
+        echo "ARM_SUBSCRIPTION_ID=$SUBSCRIPTION_ID" >> $GITHUB_ENV
+
+    - name: Terraform Init
+      id: init
+      run: |
+        cd ${{ env.TF_FOLDER }}
+        terraform init 
+
+    - name: Terraform Plan
+      id: plan
+      run: |
+        cd ${{ env.TF_FOLDER }}
+        terraform plan -var-file=../${{ inputs.environment }}/terraform.tfvars -out=tfplan
+      continue-on-error: false
+
+    - name: Terraform Apply
+      id: apply
+      run: |
+        cd ${{ env.TF_FOLDER }}
+        terraform apply -auto-approve tfplan
